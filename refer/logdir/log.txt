@@ -1,0 +1,53 @@
+[2024-04-01 16:02:38,491] torch.distributed.elastic.multiprocessing.redirects: [WARNING] NOTE: Redirects are currently not supported in Windows or MacOs.
+C:\Users\aulho\OneDrive - Danmarks Tekniske Universitet\Dokumenter\Github\VPD-main\venv\lib\site-packages\torch\distributed\launch.py:183: FutureWarning: The module torch.distributed.launch is deprecated
+and will be removed in future. Use torchrun.
+Note that --use-env is set by default in torchrun.
+If your script expects `--local-rank` argument to be set, please
+change it to read from `os.environ['LOCAL_RANK']` instead. See 
+https://pytorch.org/docs/stable/distributed.html#launch-utility for 
+further instructions
+
+  warnings.warn(
+[W socket.cpp:697] [c10d] The client socket has failed to connect to [COMP-nb5663.win.dtu.dk]:12345 (system error: 10049 - The requested address is not valid in its context.).
+Traceback (most recent call last):
+  File "C:\Users\aulho\OneDrive - Danmarks Tekniske Universitet\Dokumenter\Github\VPD-main\refer\train.py", line 11, in <module>
+    from models_refer.model import VPDRefer
+  File "C:\Users\aulho\OneDrive - Danmarks Tekniske Universitet\Dokumenter\Github\VPD-main\refer\models_refer\__init__.py", line 2, in <module>
+    from .model import VPDRefer
+  File "C:\Users\aulho\OneDrive - Danmarks Tekniske Universitet\Dokumenter\Github\VPD-main\refer\models_refer\model.py", line 11, in <module>
+    from vpd.models import UNetWrapper, TextAdapterRefer
+ModuleNotFoundError: No module named 'vpd'
+[2024-04-01 16:02:43,584] torch.distributed.elastic.multiprocessing.api: [ERROR] failed (exitcode: 1) local_rank: 0 (pid: 14000) of binary: C:\Users\aulho\OneDrive - Danmarks Tekniske Universitet\Dokumenter\Github\VPD-main\venv\Scripts\python.exe
+Traceback (most recent call last):
+  File "C:\Users\aulho\AppData\Local\Programs\Python\Python39\lib\runpy.py", line 197, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "C:\Users\aulho\AppData\Local\Programs\Python\Python39\lib\runpy.py", line 87, in _run_code
+    exec(code, run_globals)
+  File "C:\Users\aulho\OneDrive - Danmarks Tekniske Universitet\Dokumenter\Github\VPD-main\venv\lib\site-packages\torch\distributed\launch.py", line 198, in <module>
+    main()
+  File "C:\Users\aulho\OneDrive - Danmarks Tekniske Universitet\Dokumenter\Github\VPD-main\venv\lib\site-packages\torch\distributed\launch.py", line 194, in main
+    launch(args)
+  File "C:\Users\aulho\OneDrive - Danmarks Tekniske Universitet\Dokumenter\Github\VPD-main\venv\lib\site-packages\torch\distributed\launch.py", line 179, in launch
+    run(args)
+  File "C:\Users\aulho\OneDrive - Danmarks Tekniske Universitet\Dokumenter\Github\VPD-main\venv\lib\site-packages\torch\distributed\run.py", line 803, in run
+    elastic_launch(
+  File "C:\Users\aulho\OneDrive - Danmarks Tekniske Universitet\Dokumenter\Github\VPD-main\venv\lib\site-packages\torch\distributed\launcher\api.py", line 135, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "C:\Users\aulho\OneDrive - Danmarks Tekniske Universitet\Dokumenter\Github\VPD-main\venv\lib\site-packages\torch\distributed\launcher\api.py", line 268, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+train.py FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2024-04-01_16:02:43
+  host      : COMP-nb5663.win.dtu.dk
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 14000)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
