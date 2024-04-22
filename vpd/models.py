@@ -82,7 +82,17 @@ def register_attention_control(model, controller):
         return count
 
     cross_att_count = 0
-    sub_nets = model.diffusion_model.named_children()
+
+    import ldm.models.diffusion.ddpm  # Enables original code to run
+    if type(model) == ldm.models.diffusion.ddpm.DiffusionWrapper:  # Enables original code to run
+        sub_nets = model.diffusion_model.named_children()
+    else:
+        # Testing fetching the correct model class from ControlLDM // August
+        # ControlLDM
+        #    control_model (ControlNet)
+        #    model (DiffusionWrapper)
+        sub_nets = model.control_model.named_children()
+
 
     for net in sub_nets:
         if "input_blocks" in net[0]:
@@ -91,6 +101,93 @@ def register_attention_control(model, controller):
             cross_att_count += register_recr(net[1], 0, "up")
         elif "middle_block" in net[0]:
             cross_att_count += register_recr(net[1], 0, "mid")
+
+    controller.num_att_layers = cross_att_count
+
+
+def register_attention_control_ControlNet(model, controller):
+    # This function should be used to register the attention outputs of the ControlNet model // August
+    def ca_forward(self, place_in_unet):
+        def forward(x, context=None, mask=None):
+            h = self.heads
+
+            q = self.to_q(x)
+            is_cross = context is not None
+            context = default(context, x)
+            k = self.to_k(context)
+            v = self.to_v(context)
+
+            q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q, k, v))
+
+            sim = einsum('b i d, b j d -> b i j', q, k) * self.scale
+
+            if exists(mask):
+                mask = rearrange(mask, 'b ... -> b (...)')
+                max_neg_value = -torch.finfo(sim.dtype).max
+                mask = repeat(mask, 'b j -> (b h) () j', h=h)
+                sim.masked_fill_(~mask, max_neg_value)
+
+            # attention, what we cannot get enough of
+            attn = sim.softmax(dim=-1)
+
+            attn2 = rearrange(attn, '(b h) k c -> h b k c', h=h).mean(0)
+            controller(attn2, is_cross, place_in_unet)
+
+            out = einsum('b i j, b j d -> b i d', attn, v)
+            out = rearrange(out, '(b h) n d -> b n (h d)', h=h)
+            return self.to_out(out)
+
+        return forward
+
+    class DummyController:
+        def __call__(self, *args):
+            return args[0]
+
+        def __init__(self):
+            self.num_att_layers = 0
+
+    if controller is None:
+        controller = DummyController()
+
+    def register_recr(net_, count, place_in_unet):
+        if net_.__class__.__name__ == 'CrossAttention':
+            net_.forward = ca_forward(net_, place_in_unet)
+            return count + 1
+        elif hasattr(net_, 'children'):
+            for net__ in net_.children():
+                count = register_recr(net__, count, place_in_unet)
+        return count
+
+    cross_att_count = 0
+
+    # Testing fetching the correct model class from ControlLDM // August
+    # ControlLDM
+    #    control_model (ControlNet)
+    #    model (DiffusionWrapper)
+
+    # Attempting to use ControlledUnetModel from cldm as the base for registering intermediate features.
+    # This model has input_blocks, middle_blocks and output_block same as UnetModel from StableDiffusion,
+    # however, unsure if this is equivalent to extracting features from the ControlNet encoder. It could
+    # also just be that we are extracting features from the StableDiffusion encoder which I don't think is correct.
+    sub_nets = model.model.diffusion_model.named_children()  # Original StableDiffusion  // August
+    sub_nets_control = model.model.diffusion_model.named_children()  # model.control_model.named_children()  # ControlNet  // August
+
+    for net_control, net in zip(sub_nets_control, sub_nets):
+        # I assume we need to keep the attention outputs of the ControlNet encoder,
+        # but keep the attention outputs of the regular StableDiffusion decoder  // August
+        # Not sure what to use middle_hint and input_hint blocks for in ControlNet? // August
+
+        # input blocks use
+        if "input_blocks" in net_control[0]:
+            cross_att_count += register_recr(net_control[1], 0, "down")
+
+        # output blocks use
+        elif "output_blocks" in net_control[0]:
+            cross_att_count += register_recr(net_control[1], 0, "up")
+
+        # middle blocks use
+        elif "middle_block" in net_control[0]:
+            cross_att_count += register_recr(net_control[1], 0, "mid")
 
     controller.num_att_layers = cross_att_count
 
@@ -248,6 +345,131 @@ class UNetWrapper(nn.Module):
         else:
             attn64 = None
         return attn16, attn32, attn64
+
+class ControlNetWrapper(nn.Module):
+    """
+    Wrapper class for ControlNet which should replace UNetWrapper class used in VPDRefer.
+    This is a copy of UNetWrapper, but with some modifications. // August
+    """
+
+    def __init__(self, unet, use_attn=True, base_size=512, max_attn_size=None, attn_selector='up_cross+down_cross') -> None:
+        super().__init__()
+        self.unet = unet
+        self.attention_store = AttentionStore(base_size=base_size // 8, max_size=max_attn_size)
+        self.size16 = base_size // 32  # 32
+        self.size32 = base_size // 16  # 16
+        self.size64 = base_size // 8   # 8
+        self.use_attn = use_attn
+        if self.use_attn:
+            register_attention_control_ControlNet(unet, self.attention_store)
+        register_hier_output_ControlNet(unet.model)  # Trying adding .model here // August
+        self.attn_selector = attn_selector.split('+')
+
+    def forward(self, *args, **kwargs):
+        # Assigning variables as sanity check // August
+        latents = args[0]
+        t = args[1]
+        cond = kwargs
+
+        if self.use_attn:
+            self.attention_store.reset()
+        # self.unet I believe should be of type UNetModel // August
+        # out_list = self.unet(*args, **kwargs)  # Original
+
+        # Testing hacking in of forward on ControlNet here
+        cond_txt = torch.cat(cond['c_crossattn'], 1)
+
+        # cond['c_concat'] should be a list on length 1 containing the hint image batch before encoding, which for the
+        # case of tutorial_train is a tensor of shape [4, 3, 512, 512] // August
+        if None in cond['c_concat']:  # Check that hint is not None
+            out_list = self.unet.model.diffusion_model(x=latents,
+                                                       timesteps=t,
+                                                       context=cond_txt,
+                                                       control=None,
+                                                       only_mid_control=self.unet.only_mid_control)  # Runs forward on ControlledUnetModel w.o hint // August
+        else:
+            hint = torch.cat(cond['c_concat'], 1)
+            # In control_model (class ControlNet) x is expected to be in latent space (4x64x64)
+            # however, the hint is expected to be in image space (3x512x512) // August
+            control = self.unet.control_model(x=latents, hint=hint, timesteps=t, context=cond_txt)
+            control = [c * scale for c, scale in zip(control, self.unet.control_scales)]
+
+            out_list = self.unet.model.diffusion_model(x=latents,
+                                                       timesteps=t,
+                                                       context=cond_txt,
+                                                       control=control,
+                                                       only_mid_control=self.unet.only_mid_control)  # Runs forward on ControlledUnetModel w. hint // August
+
+        if self.use_attn:
+            avg_attn = self.attention_store.get_average_attention()
+            attn16, attn32, attn64 = self.process_attn(avg_attn)
+            out_list[1] = torch.cat([out_list[1], attn16], dim=1)
+            out_list[2] = torch.cat([out_list[2], attn32], dim=1)
+            if attn64 is not None:
+                out_list[3] = torch.cat([out_list[3], attn64], dim=1)
+        return out_list[::-1]
+
+    def process_attn(self, avg_attn):
+        attns = {self.size16: [], self.size32: [], self.size64: []}
+        for k in self.attn_selector:
+            for up_attn in avg_attn[k]:
+                size = int(math.sqrt(up_attn.shape[1]))
+                attns[size].append(rearrange(up_attn, 'b (h w) c -> b c h w', h=size))
+        attn16 = torch.stack(attns[self.size16]).mean(0)
+        attn32 = torch.stack(attns[self.size32]).mean(0)
+        if len(attns[self.size64]) > 0:
+            attn64 = torch.stack(attns[self.size64]).mean(0)
+        else:
+            attn64 = None
+        return attn16, attn32, attn64
+
+
+def register_hier_output_ControlNet(model):
+    # This functions assumes self is of type UNetModel (as in ControlledUnetModel(UNetModel) inside cldm.py)
+    # The function is modified to parse the extra condition which is expected by ControlledUnetModel // August
+    # This function overrides the forward function of UNetModel, which is why it needs to be changed.
+    self = model.diffusion_model
+    from ldm.modules.diffusionmodules.util import checkpoint, timestep_embedding
+    def forward(x, timesteps=None, context=None, control=None, only_mid_control=False, **kwargs):
+        """
+        Apply the model to an input batch.
+        :param x: an [N x C x ...] Tensor of inputs.
+        :param timesteps: a 1-D batch of timesteps.
+        :param context: conditioning plugged in via crossattn
+        :param y: an [N] Tensor of labels, if class-conditional.
+        :return: an [N x C x ...] Tensor of outputs.
+        """
+        hs = []
+        with torch.no_grad():
+            t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False)
+            emb = self.time_embed(t_emb)
+            h = x.type(self.dtype)
+            for module in self.input_blocks:
+                h = module(h, emb, context)
+                hs.append(h)
+            h = self.middle_block(h, emb, context)
+
+        out_list = []  # // August
+
+        if control is not None:
+            h += control.pop()
+
+        for i, module in enumerate(self.output_blocks):
+            if only_mid_control or control is None:
+                h = torch.cat([h, hs.pop()], dim=1)
+            else:
+                h = torch.cat([h, hs.pop() + control.pop()], dim=1)
+            h = module(h, emb, context)
+
+            if i in [1, 4, 7]:  # // August
+                out_list.append(h)  # // August
+
+        h = h.type(x.dtype)
+
+        out_list.append(h)  # // August
+        return out_list  # // August
+
+    self.forward = forward
 
 class TextAdapter(nn.Module):
     def __init__(self, text_dim=768, hidden_dim=None):

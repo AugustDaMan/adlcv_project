@@ -175,25 +175,18 @@ def main(args):
     print(f"local rank {args.local_rank} / global rank {utils.get_rank()} successfully built train dataset.")
     num_tasks = utils.get_world_size()
     global_rank = utils.get_rank()
-    train_sampler = torch.utils.data.distributed.DistributedSampler(dataset, num_replicas=num_tasks, rank=global_rank,
-                                                                    shuffle=True)
+    train_sampler = torch.utils.data.distributed.DistributedSampler(dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True)
     test_sampler = torch.utils.data.SequentialSampler(dataset_test)
 
     # data loader
-    data_loader = torch.utils.data.DataLoader(
-        dataset, batch_size=args.batch_size,
-        sampler=train_sampler, num_workers=args.workers, pin_memory=args.pin_mem, drop_last=True)
+    data_loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, sampler=train_sampler, num_workers=args.workers, pin_memory=args.pin_mem, drop_last=True)
 
-    data_loader_test = torch.utils.data.DataLoader(
-        dataset_test, batch_size=1, sampler=test_sampler, num_workers=args.workers)
+    data_loader_test = torch.utils.data.DataLoader(dataset_test, batch_size=1, sampler=test_sampler, num_workers=args.workers)
 
-    model = VPDRefer(sd_path='../checkpoints/v1-5-pruned-emaonly.ckpt',
-                      neck_dim=[320,640+args.token_length,1280+args.token_length,1280]
-                      )
+    model = VPDRefer(sd_path='../checkpoints/v1-5-pruned-emaonly.ckpt', neck_dim=[320,640+args.token_length,1280+args.token_length,1280])
 
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model.cuda()
-
 
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.local_rank], find_unused_parameters=True)
     single_model = model.module
@@ -244,8 +237,7 @@ def main(args):
                                   )
 
     # learning rate scheduler
-    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer,
-                                                     lambda x: (1 - x / (len(data_loader) * args.epochs)) ** 0.9)
+    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda x: (1 - x / (len(data_loader) * args.epochs)) ** 0.9)
 
     # housekeeping
     start_time = time.time()
