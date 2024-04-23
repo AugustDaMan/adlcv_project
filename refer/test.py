@@ -60,18 +60,25 @@ def evaluate(model, dataset_test, data_loader, clip_model, device):
                 print("Input embedding shape:", embedding.shape)
                 print("sentences[idx]", sentences[:, :, idx])
 
-                output = model(image, embedding)
+                # Try with dummy hint, this needs to come from the dataloader // August
+                # Notice that the hint is parsed in image space and not latent space // August
+                hint = torch.zeros([1, 3, 512, 512]).to(device='cuda')
+                # Try with None hint, to see if model can still handle this // August
+                hint = None
+
+                output = model(image, embedding, hint=hint)
                 output = output.cpu()
 
                 print("Output shape:", output.shape)
-
-                plt.figure(figsize=(16,9))
-                plt.subplot(1,2,1)
-                plt.imshow(image[0].permute(1,2,0).cpu())
+                plt.figure(figsize=(30,10))
+                plt.subplot(1, 3, 1)
+                plt.imshow(image[0].permute(1, 2, 0).cpu())
                 #cvt_sentence = dataset_test.tokenizer.convert_tokens_to_string(sentences[:, :, idx])
                 #plt.title(cvt_sentence)
-                plt.subplot(1,2,2)
-                plt.imshow(output[0,0,:,:])
+                plt.subplot(1, 3, 2)
+                plt.imshow(output[0, 0, :, :])
+                plt.subplot(1, 3, 3)
+                plt.imshow(output[0, 1, :, :])
                 plt.show()
                 input("Press Enter to continue...")
 
@@ -134,8 +141,8 @@ def main(args):
     # print(args.model)
     
     single_model = VPDRefer(sd_path='../checkpoints/v1-5-pruned-emaonly.ckpt',
-                      neck_dim=[320,640+args.token_length,1280+args.token_length,1280]
-                      )
+                      neck_dim=[320,640+args.token_length,1280+args.token_length,1280],
+                      use_original_vpd=False)
 
     checkpoint = torch.load(args.resume, map_location='cpu')
     single_model.load_state_dict(checkpoint['model'], strict=False)
@@ -145,24 +152,25 @@ def main(args):
     clip_model.cuda()
     clip_model = clip_model.eval()
 
-    #### Add controlnet // August
-    print("Adding ControlNet")
-    from ControlNet.tutorial_dataset import MyDataset
-    controlnet_dataset = MyDataset()
+    test_controlnet_dataset = False
+    if test_controlnet_dataset:
+        #### Add controlnet dataset // August
+        print("Adding ControlNet")
+        from ControlNet.tutorial_dataset import MyDataset
+        controlnet_dataset = MyDataset()
 
-    ### Test MyDataset // August
-    print(len(controlnet_dataset))
+        ### Test MyDataset // August
+        print(len(controlnet_dataset))
 
-    item = controlnet_dataset[1234]
-    jpg = item['jpg']
-    txt = item['txt']
-    hint = item['hint']
-    print(txt)
-    print(jpg.shape)
-    print(hint.shape)
+        item = controlnet_dataset[1234]
+        jpg = item['jpg']
+        txt = item['txt']
+        hint = item['hint']
+        print(txt)
+        print(jpg.shape)
+        print(hint.shape)
 
     ### Evaluate VPD
-
     evaluate(model, dataset_test, data_loader_test, clip_model, device=device)
 
 

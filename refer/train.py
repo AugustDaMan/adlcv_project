@@ -19,6 +19,10 @@ from transformers.models.clip.modeling_clip import CLIPTextModel
 import gc
 from collections import OrderedDict
 
+# Adding control path to script
+import sys
+sys.path.append('../ControlNet')
+
 
 def get_dataset(image_set, transform, args):
     from data.dataset_refer_clip import ReferDataset
@@ -137,7 +141,14 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
         
         embedding = clip_model(input_ids=sentences).last_hidden_state
         attentions = attentions.unsqueeze(dim=-1)  # (batch, N_l, 1)
-        output = model(image, embedding)
+
+        # Try with dummy hint, this needs to come from the dataloader // August
+        # Notice that the hint is parsed in image space and not latent space // August
+        hint = torch.zeros([1, 3, 512, 512]).to(device='cuda')
+        # Try with None hint, to see if model can still handle this // August
+        #hint = None
+
+        output = model(image, embedding, hint=hint)
 
         loss = criterion(output, target)
         optimizer.zero_grad()  # set_to_none=True is only available in pytorch 1.6+
@@ -164,31 +175,37 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
     torch.cuda.reset_peak_memory_stats()
 
 def main(args):
-    dataset, num_classes = get_dataset("train",
-                                       get_transform(args=args),
-                                       args=args)
-    dataset_test, _ = get_dataset("val",
-                                  get_transform(args=args),
-                                  args=args)
+    # Add default args // August
+    # example: refcoco /path/to/vpd_ris_refcoco.pth --token_length 40
+    args.token_length = 40
+    args.dataset = "refcoco"
+    args.img_size = 512  # 512 (original)
+    # Override arg with path to vpd pre-trained weights // August
+    args.resume = "../saved_models/vpd_ris_refcoco.pth"
+    device = torch.device(args.device)
+
+    dataset, num_classes = get_dataset("train", get_transform(args=args),args=args)
+    dataset_test, _ = get_dataset("val", get_transform(args=args), args=args)
 
     # batch sampler
-    print(f"local rank {args.local_rank} / global rank {utils.get_rank()} successfully built train dataset.")
-    num_tasks = utils.get_world_size()
-    global_rank = utils.get_rank()
-    train_sampler = torch.utils.data.distributed.DistributedSampler(dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True)
+    #print(f"local rank {args.local_rank} / global rank {utils.get_rank()} successfully built train dataset.")
+    #num_tasks = utils.get_world_size()
+    #global_rank = utils.get_rank()
+    train_sampler = torch.utils.data.SequentialSampler(dataset)
     test_sampler = torch.utils.data.SequentialSampler(dataset_test)
 
     # data loader
     data_loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, sampler=train_sampler, num_workers=args.workers, pin_memory=args.pin_mem, drop_last=True)
-
     data_loader_test = torch.utils.data.DataLoader(dataset_test, batch_size=1, sampler=test_sampler, num_workers=args.workers)
 
-    model = VPDRefer(sd_path='../checkpoints/v1-5-pruned-emaonly.ckpt', neck_dim=[320,640+args.token_length,1280+args.token_length,1280])
+    model = VPDRefer(sd_path='../checkpoints/v1-5-pruned-emaonly.ckpt',
+                     neck_dim=[320,640+args.token_length,1280+args.token_length,1280],
+                     use_original_vpd=False)
 
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model.cuda()
 
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.local_rank], find_unused_parameters=True)
+    #model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.local_rank], find_unused_parameters=True)
     single_model = model.module
 
     clip_model = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
@@ -254,9 +271,17 @@ def main(args):
 
     # training loops
     for epoch in range(max(0, resume_epoch+1), args.epochs):
-        data_loader.sampler.set_epoch(epoch)
-        train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, args.print_freq,
-                        iterations, clip_model)
+        #data_loader.sampler.set_epoch(epoch)
+        train_one_epoch(model,
+                        criterion,
+                        optimizer,
+                        data_loader,
+                        lr_scheduler,
+                        epoch,
+                        args.print_freq,
+                        iterations,
+                        clip_model)
+
         iou, overallIoU = evaluate(model, data_loader_test, clip_model)
 
         print('Average object IoU {}'.format(iou))
