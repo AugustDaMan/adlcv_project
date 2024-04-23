@@ -30,6 +30,16 @@ def get_dataset(image_set, transform, args):
     num_classes = 2
     return ds, num_classes
 
+def get_dataset_control(image_set, transform, args):
+    from data.dataset_refer_clip import ReferDatasetControl
+    ds = ReferDatasetControl(args,
+                      split=image_set,
+                      image_transforms=transform,
+                      target_transforms=None,
+                      eval_mode=True
+                      )
+    num_classes = 2
+    return ds, num_classes
 
 def evaluate(model, dataset_test, data_loader, clip_model, device):
     model.eval()
@@ -45,9 +55,9 @@ def evaluate(model, dataset_test, data_loader, clip_model, device):
 
     with torch.no_grad():
         for data in metric_logger.log_every(data_loader, 100, header):
-            image, target, sentences, attentions = data
-            image, target, sentences, attentions = image.to(device), target.to(device), \
-                                                   sentences.to(device), attentions.to(device)
+            image, target, sentences, attentions, hint = data
+            image, target, sentences, attentions, hint = image.to(device), target.to(device), \
+                                                   sentences.to(device), attentions.to(device), hint.to(device)
             sentences = sentences.squeeze(1)
             attentions = attentions.squeeze(1)
             target = target.cpu().data.numpy()
@@ -62,25 +72,28 @@ def evaluate(model, dataset_test, data_loader, clip_model, device):
 
                 # Try with dummy hint, this needs to come from the dataloader // August
                 # Notice that the hint is parsed in image space and not latent space // August
-                hint = torch.zeros([1, 3, 512, 512]).to(device='cuda')
+                #hint = torch.zeros([1, 3, 512, 512]).to(device='cuda')
                 # Try with None hint, to see if model can still handle this // August
-                hint = None
+                #hint = None
 
                 output = model(image, embedding, hint=hint)
                 output = output.cpu()
 
                 print("Output shape:", output.shape)
-                plt.figure(figsize=(30,10))
-                plt.subplot(1, 3, 1)
+                print("Plotting is currently: input image, segmentation output, target, hint")
+                plt.figure(figsize=(40,10))
+                plt.subplot(1, 4, 1)
                 plt.imshow(image[0].permute(1, 2, 0).cpu())
                 #cvt_sentence = dataset_test.tokenizer.convert_tokens_to_string(sentences[:, :, idx])
                 #plt.title(cvt_sentence)
-                plt.subplot(1, 3, 2)
-                plt.imshow(output[0, 0, :, :])
-                plt.subplot(1, 3, 3)
+                plt.subplot(1, 4, 2)
                 plt.imshow(output[0, 1, :, :])
+                plt.subplot(1, 4, 3)
+                plt.imshow(target[0, :, :])
+                plt.subplot(1, 4, 4)
+                plt.imshow(hint[0].permute(1, 2, 0).cpu())
                 plt.show()
-                input("Press Enter to continue...")
+                #input("Press Enter to continue...")
 
                 output_mask = output.argmax(1).data.numpy()
                 I, U = computeIoU(output_mask, target)
@@ -95,6 +108,8 @@ def evaluate(model, dataset_test, data_loader, clip_model, device):
                     eval_seg_iou = eval_seg_iou_list[n_eval_iou]
                     seg_correct[n_eval_iou] += (this_iou >= eval_seg_iou)
                 seg_total += 1
+
+
 
     mean_IoU = np.array(mean_IoU)
     mIoU = np.mean(mean_IoU)
@@ -134,7 +149,8 @@ def main(args):
     args.resume = "../saved_models/vpd_ris_refcoco.pth"
 
     device = torch.device(args.device)
-    dataset_test, _ = get_dataset(args.split, get_transform(args=args), args)
+    #dataset_test, _ = get_dataset(args.split, get_transform(args=args), args)  # Original
+    dataset_test, _ = get_dataset_control(args.split, get_transform(args=args), args)  # Added bounding box mask as output
     test_sampler = torch.utils.data.SequentialSampler(dataset_test)
     data_loader_test = torch.utils.data.DataLoader(dataset_test, batch_size=1,
                                                    sampler=test_sampler, num_workers=args.workers)

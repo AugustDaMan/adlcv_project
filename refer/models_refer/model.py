@@ -97,6 +97,10 @@ class VPDRefer(nn.Module):
             c_concat = hint  # Assign hint here // August
             with torch.no_grad():
                 latents = self.controlnet.encode_first_stage(img).mode().detach()
+                #encoder_posterior = self.controlnet.encode_first_stage(img)
+                #latents = self.controlnet.get_first_stage_encoding(encoder_posterior).detach()
+                #latents = self.controlnet.encode_first_stage(img).sample().detach()  # Testing .sample instead of .mode
+                #latents = latents * self.controlnet.scale_factor
             c_crossattn = self.text_adapter(latents, l_feats, self.gamma)
             t = torch.ones((img.shape[0],), device=img.device).long()
             # In controlwrapper, c_concat is interpreted as the hint
