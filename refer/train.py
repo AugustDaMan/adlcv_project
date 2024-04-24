@@ -36,6 +36,18 @@ def get_dataset(image_set, transform, args):
 
     return ds, num_classes
 
+def get_dataset_control(image_set, transform, args):
+    from data.dataset_refer_clip import ReferDatasetControl
+    ds = ReferDatasetControl(args,
+                      split=image_set,
+                      image_transforms=transform,
+                      target_transforms=None,
+                      eval_mode=True
+                      )
+    num_classes = 2
+    return ds, num_classes
+
+
 def computeIoU(pred_seg, gd_seg):
     I = np.sum(np.logical_and(pred_seg, gd_seg))
     U = np.sum(np.logical_or(pred_seg, gd_seg))
@@ -184,8 +196,10 @@ def main(args):
     args.resume = "../saved_models/vpd_ris_refcoco.pth"
     device = torch.device(args.device)
 
-    dataset, num_classes = get_dataset("train", get_transform(args=args),args=args)
-    dataset_test, _ = get_dataset("val", get_transform(args=args), args=args)
+    #dataset, num_classes = get_dataset("train", get_transform(args=args),args=args)
+    #dataset_test, _ = get_dataset("val", get_transform(args=args), args=args)
+    dataset, num_classes = get_dataset_control("train", get_transform(args=args), args=args)
+    dataset_test, _ = get_dataset_control("val", get_transform(args=args), args=args)
 
     # batch sampler
     #print(f"local rank {args.local_rank} / global rank {utils.get_rank()} successfully built train dataset.")
@@ -305,12 +319,8 @@ def main(args):
 
 # Added main_single_process
 def main_single_process(args):
-    dataset, num_classes = get_dataset("train",
-                                       get_transform(args=args),
-                                       args=args)
-    dataset_test, _ = get_dataset("val",
-                                  get_transform(args=args),
-                                  args=args)
+    dataset, num_classes = get_dataset_control("train", get_transform(args=args), args=args)
+    dataset_test, _ = get_dataset_control("val", get_transform(args=args), args=args)
 
     # Disable samplers related to ddp // August
     # batch sampler
