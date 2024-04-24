@@ -1,6 +1,8 @@
 ControlNet/training/
 ControlNet/models/control_sd15_ini.ckpt
 checkpoints/
-refer/data/
+refer/data/refcoco*
+refer/data/images
+
 *.ckpt
 *.pth
