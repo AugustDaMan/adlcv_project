@@ -20,6 +20,7 @@ import torch.nn.functional as F
 from transformers.models.clip.modeling_clip import CLIPTextModel
 import gc
 from collections import OrderedDict
+import pickle
 
 # Adding control path to script
 import sys
@@ -129,9 +130,11 @@ def evaluate(model, data_loader, clip_model):
                     file_name = '../saved_images/train_run0/bbox_model_ite_%d.png' % total_its
                     save_image(grid_img, file_name)
 
+                    # save predictions
+                    pred_filename = "../saved_predictions/pred_img_ite_%d.pickle" % total_its
+                    pickle.dump(output, open(pred_filename, "wb"), protocol=pickle.HIGHEST_PROTOCOL)
 
 
-        
         iou = acc_ious / total_its
 
     mean_IoU = np.array(mean_IoU)
@@ -148,7 +151,7 @@ def evaluate(model, data_loader, clip_model):
     return 100 * iou, 100 * cum_I / cum_U
 
 
-def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, print_freq, iterations, clip_model):
+def train_one_epoch(model, criterion, optimizer, data_loader, data_loader_test, lr_scheduler, epoch, print_freq, iterations, clip_model, sentence_drop_rate, train_loss_ite_list, val_loss_ite_list):
 
     total_gpu_mem = torch.cuda.get_device_properties(0).total_memory/10**9  # Used to gauge model footprint // August
 
@@ -172,6 +175,10 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
 
         sentences = sentences.squeeze(1)
         attentions = attentions.squeeze(1)
+
+        # Drop sentences some percent of the time // August
+        if torch.rand(1,1).item() > sentence_drop_rate:  # // August
+            sentences[:] = 49407  # Set all entries in sentences to the "EOS" (49407) Token
         
         #embedding = clip_model(input_ids=sentences).last_hidden_state
         embedding = clip_model(input_ids=sentences[:,:,0]).last_hidden_state  # clip_model only works what i assume to be one sentence at a time // August
@@ -193,8 +200,26 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
 
         #torch.cuda.synchronize  # Disable synchronize // August
         train_loss += loss.item()
+        if iterations % 100 == 0:
+            # Record train loss every Nth iteration // August
+            train_loss_ite_list.append([loss.item(), iterations])
+
+            # Run validation on random sample from test_loader // August
+            rand_test_idx = torch.randint(low=0, high=len(data_loader_test), size=(1, 1)).item()
+            image, target, sentences, attentions, hint = data_loader_test.dataset[rand_test_idx]
+            image, target, sentences, attentions, hint = image.cuda(non_blocking=True), \
+                                                         target.cuda(non_blocking=True), \
+                                                         sentences.cuda(non_blocking=True), \
+                                                         attentions.cuda(non_blocking=True), \
+                                                         hint.cuda(non_blocking=True)
+            sentences = sentences.squeeze(1)
+            with torch.no_grad():
+                embedding = clip_model(input_ids=sentences[:, :, 0]).last_hidden_state
+                output = model(image.unsqueeze(0), embedding, hint=hint.unsqueeze(0))  # unsqueeze because batch_size is 1 // August
+                val_loss = criterion(output, target.unsqueeze(0))  # unsqueeze because batch_size is 1 // August
+                val_loss_ite_list.append([val_loss.item(), iterations])
+
         iterations += 1
-        #metric_logger.update(loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
 
         del image, target, sentences, attentions, loss, output, data
         del embedding
@@ -222,8 +247,8 @@ def main_single_process(args):
     print("Number of samples in test dataset: %d" % n_test)
 
     # Define dataset subsets for train and test
-    subset_size_train = 4000  # Number of samples in train subset // August
-    subset_size_test = 200  # Number of samples in test subset // August
+    subset_size_train = 2  # Number of samples in train subset // August
+    subset_size_test = 2  # Number of samples in test subset // August
     subset_indices_train = torch.randperm(len(dataset))[:subset_size_train]
     subset_indices_test = torch.randperm(len(dataset_test))[:subset_size_test]
     subset_train = torch.utils.data.Subset(dataset, indices=subset_indices_train)
@@ -314,6 +339,11 @@ def main_single_process(args):
     iterations = 0
     best_oIoU = -0.1
 
+    train_loss_ite_list = []
+    val_loss_ite_list = []
+    iou_list = []
+    overallIoU_list = []
+
     # resume training (optimizer, lr scheduler, and the epoch)
     if args.resume:
         # Disabling these lines as checkpoint only contains key 'model' // August
@@ -329,9 +359,24 @@ def main_single_process(args):
         print("Epoch {}/{}".format(epoch+1, args.epochs))
         #data_loader.sampler.set_epoch(epoch)  # data_loader has no sampler // August
 
-        train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, args.print_freq, iterations, clip_model)
+        train_one_epoch(model,
+                        criterion,
+                        optimizer,
+                        data_loader,
+                        data_loader_test,
+                        lr_scheduler,
+                        epoch,
+                        args.print_freq,
+                        iterations,
+                        clip_model,
+                        args.sentence_drop_rate,
+                        train_loss_ite_list,
+                        val_loss_ite_list)
 
         iou, overallIoU = evaluate(model, data_loader_test, clip_model)
+
+        iou_list.append(iou)  # Append iou to list after every epoch // August
+        overallIoU_list.append(overallIoU)  # Append overall iou to list after every epoch // August
 
         print('Average object IoU {}'.format(iou))
         print('Overall IoU {}'.format(overallIoU))
@@ -349,6 +394,12 @@ def main_single_process(args):
             utils.save_on_master(dict_to_save, os.path.join(args.output_dir,
                                                             'model_best_{}.pth'.format(args.model_id)))
             best_oIoU = overallIoU
+
+    # Save losses as pickle files // August
+    pickle.dump(iou_list, open("../saved_losses/iou_list.pickle", "wb"), protocol=pickle.HIGHEST_PROTOCOL)
+    pickle.dump(overallIoU_list, open("../saved_losses/overallIoU_list.pickle", "wb"), protocol=pickle.HIGHEST_PROTOCOL)
+    pickle.dump(train_loss_ite_list, open("../saved_losses/train_loss_ite_list.pickle", "wb"), protocol=pickle.HIGHEST_PROTOCOL)
+    pickle.dump(val_loss_ite_list, open("../saved_losses/val_loss_ite_list.pickle", "wb"),protocol=pickle.HIGHEST_PROTOCOL)
 
     # summarize
     total_time = time.time() - start_time
@@ -389,6 +440,7 @@ if __name__ == "__main__":
     args.resume = "../saved_models/vpd_ris_refcoco.pth"
     args.output_dir = "../saved_models"
     args.use_original_vpd = False
+    args.sentence_drop_rate = 0.5  # Drop sentences 50% of the time // August
 
     # set up distributed learning
     utils.init_distributed_mode(args)
