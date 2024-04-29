@@ -28,6 +28,7 @@ class VPDRefer(nn.Module):
                  token_embed_dim=768,
                  neck_dim=[320,680,1320,1280],
                  use_original_vpd=False,
+                 controlnet_batch_size=4,
                  **args):
         super().__init__()
 
@@ -58,7 +59,7 @@ class VPDRefer(nn.Module):
 
             resume_path = "../ControlNet/models/control_sd15_ini.ckpt"
             self.controlnet.load_state_dict(load_state_dict(resume_path, location='cpu'))
-            self.controlnet.batch_size = 1
+            self.controlnet.batch_size = controlnet_batch_size
             self.controlnet.logger_freq = 300
             self.controlnet.learning_rate = 1e-5
             self.controlnet.sd_locked = True

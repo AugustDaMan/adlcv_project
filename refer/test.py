@@ -4,6 +4,7 @@ import time
 import matplotlib.pyplot as plt
 
 import torch
+from torchvision.utils import save_image, make_grid
 import torch.utils.data
 from torch import nn
 
@@ -52,9 +53,12 @@ def evaluate(model, dataset_test, data_loader, clip_model, device):
     seg_total = 0
     mean_IoU = []
     header = 'Test:'
+    total_its = 0
 
     with torch.no_grad():
         for data in metric_logger.log_every(data_loader, 100, header):
+            total_its += 1
+
             image, target, sentences, attentions, hint = data
             image, target, sentences, attentions, hint = image.to(device), target.to(device), \
                                                    sentences.to(device), attentions.to(device), hint.to(device)
@@ -109,6 +113,18 @@ def evaluate(model, dataset_test, data_loader, clip_model, device):
                     seg_correct[n_eval_iou] += (this_iou >= eval_seg_iou)
                 seg_total += 1
 
+                if idx == 0:  # Save output image // August
+                    img_unnorm = torch.clamp(image[0] / 2 + 0.5, min=0, max=1).cpu()  # Unnormalize // August
+                    img_output = torch.tile(output.argmax(1)[0], dims=(3, 1, 1))
+                    img_target = torch.tile(torch.tensor(target[0]), dims=(3, 1, 1))
+                    img_hint = hint[0].cpu()
+                    img_list = [img_unnorm, img_hint, img_output, img_target]
+                    row = torch.stack(img_list)
+                    grid_img = make_grid(row, nrow=len(row), padding=4)
+                    file_name = '../saved_images/test_run0/bbox_model_ite_%d.png' % total_its
+                    save_image(grid_img, file_name)
+
+
 
 
     mean_IoU = np.array(mean_IoU)
@@ -147,6 +163,10 @@ def main(args):
     args.img_size = 512  # 512 (original)
     # Override arg with path to vpd pre-trained weights // August
     args.resume = "../saved_models/vpd_ris_refcoco.pth"
+    args.batch_size = 1
+    args.use_original_vpd = False
+    print("Running test.py on dataset:", args.dataset)
+    print('Image size: {}'.format(str(args.img_size)))
 
     device = torch.device(args.device)
     #dataset_test, _ = get_dataset(args.split, get_transform(args=args), args)  # Original
@@ -156,9 +176,7 @@ def main(args):
                                                    sampler=test_sampler, num_workers=args.workers)
     # print(args.model)
     
-    single_model = VPDRefer(sd_path='../checkpoints/v1-5-pruned-emaonly.ckpt',
-                      neck_dim=[320,640+args.token_length,1280+args.token_length,1280],
-                      use_original_vpd=False)
+    single_model = VPDRefer(sd_path='../checkpoints/v1-5-pruned-emaonly.ckpt', neck_dim=[320,640+args.token_length,1280+args.token_length,1280], use_original_vpd=args.use_original_vpd, controlnet_batch_size=args.batch_size)
 
     checkpoint = torch.load(args.resume, map_location='cpu')
     single_model.load_state_dict(checkpoint['model'], strict=False)
@@ -194,5 +212,4 @@ if __name__ == "__main__":
     from args import get_parser
     parser = get_parser()
     args = parser.parse_args()
-    print('Image size: {}'.format(str(args.img_size)))
     main(args)
