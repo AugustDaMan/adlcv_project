@@ -156,11 +156,13 @@ class ReferDatasetControl(ReferDataset):
         if self.eval_mode:
             embedding = []
             att = []
+            raw_sentence = []
             for s in range(len(self.input_ids[index])):
                 e = self.input_ids[index][s]
                 a = self.attention_masks[index][s]
                 embedding.append(e.unsqueeze(-1))
                 att.append(a.unsqueeze(-1))
+                raw_sentence.append(self.refer.Refs[this_ref_id]['sentences'][s]['raw'])
 
             tensor_embeddings = torch.cat(embedding, dim=-1)
             attention_mask = torch.cat(att, dim=-1)
@@ -168,9 +170,9 @@ class ReferDatasetControl(ReferDataset):
             choice_sent = np.random.choice(len(self.input_ids[index]))
             tensor_embeddings = self.input_ids[index][choice_sent]
             attention_mask = self.attention_masks[index][choice_sent]
+            # Get sentences
+            raw_sentence  = [self.refer.Refs[this_ref_id]['sentences'][choice_sent]['raw']]
 
-        # Get sentences
-        raw_sentence  = self.refer.Refs[this_ref_id]['sentences'][choice_sent]['raw']
 
         return img, target, tensor_embeddings, attention_mask, bbox_mask, raw_sentence
         
