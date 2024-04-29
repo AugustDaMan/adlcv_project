@@ -143,7 +143,7 @@ def evaluate(model, data_loader, clip_model):
                     img_list = [img_unnorm, img_hint, img_output, img_target]
                     row = torch.stack(img_list)
                     grid_img = make_grid(row, nrow=len(row), padding=4)
-                    file_name = '../saved_images/train_run0/bbox_model_ite_%d.png' % total_its
+                    file_name = '../saved_images/train_run0/bbox_model_ite_%d_%s.png' % (total_its, raw_sentence)
                     save_image(grid_img, file_name)
 
                     # save predictions
@@ -222,7 +222,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, data_loader_test, 
 
             # Run validation on random sample from test_loader // August
             rand_test_idx = torch.randint(low=0, high=len(data_loader_test), size=(1, 1)).item()
-            image, target, sentences, attentions, hint = data_loader_test.dataset[rand_test_idx]
+            image, target, sentences, attentions, hint, raw_sentence = data_loader_test.dataset[rand_test_idx]
             image, target, sentences, attentions, hint = image.cuda(non_blocking=True), \
                                                          target.cuda(non_blocking=True), \
                                                          sentences.cuda(non_blocking=True), \

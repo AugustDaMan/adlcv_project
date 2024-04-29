@@ -170,7 +170,7 @@ class ReferDatasetControl(ReferDataset):
             attention_mask = self.attention_masks[index][choice_sent]
 
         # Get sentences
-        raw_sentence  = self.refer.Refs[this_ref_id]['sentences'][choice_sent]['raw']
+        raw_sentence = self.refer.Refs[this_ref_id]['sentences'][choice_sent]['raw']
 
         return img, target, tensor_embeddings, attention_mask, bbox_mask, raw_sentence
         
