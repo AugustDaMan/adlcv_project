@@ -26,6 +26,22 @@ import sys
 sys.path.append('../ControlNet')
 
 
+def seed_everything(seed: int):
+    import random, os
+    import numpy as np
+    import torch
+    
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = True
+    
+seed_everything(42)
+
+
 def get_dataset(image_set, transform, args):
     from data.dataset_refer_clip import ReferDataset
     ds = ReferDataset(args,
@@ -87,7 +103,7 @@ def evaluate(model, data_loader, clip_model):
     with torch.no_grad():
         for data in metric_logger.log_every(data_loader, 100, header):
             total_its += 1
-            image, target, sentences, attentions, hint = data
+            image, target, sentences, attentions, hint, raw_sentence = data
             image, target, sentences, attentions, hint = image.cuda(non_blocking=True), target.cuda(non_blocking=True), \
                                                          sentences.cuda(non_blocking=True), attentions.cuda(non_blocking=True), \
                                                          hint.cuda(non_blocking=True)
@@ -163,7 +179,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
     for data in data_loader:
         total_its += 1
         print("Iteration {}/{}".format(total_its, len(data_loader)))
-        image, target, sentences, attentions, hint = data
+        image, target, sentences, attentions, hint, raw_sentence = data
         image, target, sentences, attentions, hint = image.cuda(non_blocking=True),\
                                                      target.cuda(non_blocking=True),\
                                                      sentences.cuda(non_blocking=True),\
@@ -196,7 +212,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
         iterations += 1
         #metric_logger.update(loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
 
-        del image, target, sentences, attentions, loss, output, data
+        del image, target, sentences, attentions, loss, output, data, raw_sentence
         del embedding
 
         gc.collect()
@@ -246,6 +262,8 @@ def main_single_process(args):
     # data loader - single process // August
     data_loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, num_workers=args.workers, pin_memory=args.pin_mem, drop_last=True)
     data_loader_test = torch.utils.data.DataLoader(dataset_test, batch_size=1, num_workers=args.workers)
+
+    # data_loader.dataset.dataset.refer.IMAGE_DIR = 'refer/' + data_loader.dataset.dataset.refer.IMAGE_DIR
 
     print("Creating subset of train dataloader %d / %d" % (subset_size_train, n_train))
     print("Creating subset of test dataloader %d / %d" % (subset_size_test, n_test))

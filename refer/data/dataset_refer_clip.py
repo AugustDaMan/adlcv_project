@@ -114,7 +114,6 @@ class ReferDataset(data.Dataset):
             tensor_embeddings = self.input_ids[index][choice_sent]
             attention_mask = self.attention_masks[index][choice_sent]
 
-
         return img, target, tensor_embeddings, attention_mask
 
 def create_mask(bbox, image_shape):
@@ -170,6 +169,8 @@ class ReferDatasetControl(ReferDataset):
             tensor_embeddings = self.input_ids[index][choice_sent]
             attention_mask = self.attention_masks[index][choice_sent]
 
+        # Get sentences
+        raw_sentence  = self.refer.Refs[this_ref_id]['sentences'][choice_sent]['raw']
 
-        return img, target, tensor_embeddings, attention_mask, bbox_mask
+        return img, target, tensor_embeddings, attention_mask, bbox_mask, raw_sentence
         
