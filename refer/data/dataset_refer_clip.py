@@ -60,9 +60,10 @@ class ReferDataset(data.Dataset):
             for i, (el, sent_id) in enumerate(zip(ref['sentences'], ref['sent_ids'])):
                 sentence_raw = el['sent']
 
-                input_ids = self.tokenizer(text=sentence_raw, truncation=True, max_length=self.max_tokens, return_length=True,
-                                        return_overflowing_tokens=False, padding="max_length", return_tensors="pt")
-                
+                input_ids = self.tokenizer(text=sentence_raw, truncation=True, max_length=self.max_tokens,
+                                           return_length=True,
+                                           return_overflowing_tokens=False, padding="max_length", return_tensors="pt")
+
                 # truncation of tokens
                 padded_input_ids = input_ids['input_ids'][:, :self.max_tokens]
                 attention_mask = input_ids['attention_mask'][:, :self.max_tokens]
@@ -95,7 +96,7 @@ class ReferDataset(data.Dataset):
         annot = Image.fromarray(annot.astype(np.uint8), mode="P")
 
         if self.image_transforms is not None:
-        # resize, from PIL to tensor, and mean and std normalization
+            # resize, from PIL to tensor, and mean and std normalization
             img, target = self.image_transforms(img, annot)
 
         if self.eval_mode:
@@ -116,12 +117,13 @@ class ReferDataset(data.Dataset):
 
         return img, target, tensor_embeddings, attention_mask
 
+
 def create_mask(bbox, image_shape):
     """
     Create mask of 1's where bounding box encompasses
     """
-    mask = torch.tile(torch.zeros(image_shape).T, dims=(3,1,1))
-    mask[:, int(bbox[1]): int(bbox[1])+int(bbox[3]), int(bbox[0]):int(bbox[0])+int(bbox[2])] = 1
+    mask = torch.tile(torch.zeros(image_shape).T, dims=(3, 1, 1))
+    mask[:, int(bbox[1]): int(bbox[1]) + int(bbox[3]), int(bbox[0]):int(bbox[0]) + int(bbox[2])] = 1
     return mask
 
 
@@ -144,23 +146,23 @@ class ReferDatasetControl(ReferDataset):
         bbox = self.refer.getRefBox(this_ref_id)
         bbox_mask = create_mask(bbox, img.size)
 
-
         if self.image_transforms is not None:
-        # resize, from PIL to tensor, and mean and std normalization
+            # resize, from PIL to tensor, and mean and std normalization
             img, target = self.image_transforms(img, annot)
-            bbox_mask = resize(bbox_mask,(img.shape[1], img.shape[2]), interpolation=InterpolationMode.NEAREST)
+            bbox_mask = resize(bbox_mask, (img.shape[1], img.shape[2]), interpolation=InterpolationMode.NEAREST)
 
-            #bbox_mask = torch.nn.functional.interpolate(bbox_mask[None, None, ...], size=(img.shape[1], img.shape[2])).squeeze()
-            
+            # bbox_mask = torch.nn.functional.interpolate(bbox_mask[None, None, ...], size=(img.shape[1], img.shape[2])).squeeze()
 
         if self.eval_mode:
             embedding = []
             att = []
+            raw_sentence = []
             for s in range(len(self.input_ids[index])):
                 e = self.input_ids[index][s]
                 a = self.attention_masks[index][s]
                 embedding.append(e.unsqueeze(-1))
                 att.append(a.unsqueeze(-1))
+                raw_sentence.append(self.refer.Refs[this_ref_id]['sentences'][s]['raw'])
 
             tensor_embeddings = torch.cat(embedding, dim=-1)
             attention_mask = torch.cat(att, dim=-1)
@@ -168,9 +170,7 @@ class ReferDatasetControl(ReferDataset):
             choice_sent = np.random.choice(len(self.input_ids[index]))
             tensor_embeddings = self.input_ids[index][choice_sent]
             attention_mask = self.attention_masks[index][choice_sent]
-
-        # Get sentences
-        raw_sentence = self.refer.Refs[this_ref_id]['sentences'][choice_sent]['raw']
+            # Get sentences
+            raw_sentence = [self.refer.Refs[this_ref_id]['sentences'][choice_sent]['raw']]
 
         return img, target, tensor_embeddings, attention_mask, bbox_mask, raw_sentence
-        

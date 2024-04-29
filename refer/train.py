@@ -143,7 +143,9 @@ def evaluate(model, data_loader, clip_model):
                     img_list = [img_unnorm, img_hint, img_output, img_target]
                     row = torch.stack(img_list)
                     grid_img = make_grid(row, nrow=len(row), padding=4)
-                    file_name = '../saved_images/train_run0/bbox_model_ite_%d_%s.png' % (total_its, raw_sentence)
+                    file_name = '../saved_images/train_run0/bbox_ite_%d_text_%s.png' % (total_its, raw_sentence[0][0])
+                    file_name.replace(" ", "_")
+                    file_name.replace(",", "")
                     save_image(grid_img, file_name)
 
                     # save predictions
