@@ -257,8 +257,8 @@ def train_one_epoch(model, criterion, optimizer, data_loader, data_loader_test, 
 def main_single_process(args):
 
     # Define datasets
-    dataset, num_classes = get_dataset_control("train", get_transform(args=args), args=args)
-    dataset_test, _ = get_dataset_control("val", get_transform(args=args), args=args)
+    dataset, num_classes = get_dataset_control("train", get_transform(args=args), args=args, resize_to_bbox=args.resize_to_bbox)
+    dataset_test, _ = get_dataset_control("val", get_transform(args=args), args=args, resize_to_bbox=args.resize_to_bbox)
 
     n_train = len(dataset)
     n_test = len(dataset_test)

@@ -47,13 +47,14 @@ def get_dataset(image_set, transform, args):
     num_classes = 2
     return ds, num_classes
 
-def get_dataset_control(image_set, transform, args):
+def get_dataset_control(image_set, transform, args, resize_to_bbox=False):
     from data.dataset_refer_clip import ReferDatasetControl
     ds = ReferDatasetControl(args,
                       split=image_set,
                       image_transforms=transform,
                       target_transforms=None,
-                      eval_mode=True
+                      eval_mode=True,
+                      resize_to_bbox=resize_to_bbox
                       )
     num_classes = 2
     return ds, num_classes
@@ -137,7 +138,7 @@ def evaluate(model, dataset_test, data_loader, clip_model, device):
                     img_list = [img_unnorm, img_hint, img_output, img_target]
                     row = torch.stack(img_list)
                     grid_img = make_grid(row, nrow=len(row), padding=4)
-                    file_name = '../saved_images/test_run0/bbox_model_ite_%d.png' % total_its
+                    file_name = '../saved_images/test_run0/bbox_model_ite_%d_originalvpd_%s.png' % (total_its, args.use_original_vpd)
                     save_image(grid_img, file_name)
 
 
@@ -180,18 +181,22 @@ def main(args):
     # Override arg with path to vpd pre-trained weights // August
     args.resume = "../saved_models/vpd_ris_refcoco.pth"
     args.batch_size = 1
-    args.use_original_vpd = False
+    args.use_original_vpd = True
+    args.resize_to_bbox = True
+
     print("Running test.py on dataset:", args.dataset)
     print('Image size: {}'.format(str(args.img_size)))
 
     device = torch.device(args.device)
     #dataset_test, _ = get_dataset(args.split, get_transform(args=args), args)  # Original
-    dataset_test, _ = get_dataset_control(args.split, get_transform(args=args), args)  # Added bounding box mask as output
+    dataset_test, _ = get_dataset_control(args.split, get_transform(args=args), args, resize_to_bbox=args.resize_to_bbox)  # Added bounding box mask as output
     test_sampler = torch.utils.data.SequentialSampler(dataset_test)
     data_loader_test = torch.utils.data.DataLoader(dataset_test, batch_size=1,
                                                    sampler=test_sampler, num_workers=args.workers)
     # print(args.model)
-    
+    data_loader_test.dataset.refer.IMAGE_DIR = 'refer/' + data_loader_test.dataset.refer.IMAGE_DIR
+    next(iter(data_loader_test))
+
     single_model = VPDRefer(sd_path='../checkpoints/v1-5-pruned-emaonly.ckpt', neck_dim=[320,640+args.token_length,1280+args.token_length,1280], use_original_vpd=args.use_original_vpd, controlnet_batch_size=args.batch_size)
 
     checkpoint = torch.load(args.resume, map_location='cpu')
