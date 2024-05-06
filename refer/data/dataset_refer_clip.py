@@ -128,6 +128,17 @@ def create_mask(bbox, image_shape):
 
 
 class ReferDatasetControl(ReferDataset):
+    def __init__(self,
+                args,
+                image_transforms=None,
+                target_transforms=None,
+                split='train',
+                eval_mode=False,
+                resize_to_bbox=False):
+        
+        super().__init__(args, image_transforms, target_transforms, split, eval_mode)
+        self.resize_to_bbox = resize_to_bbox
+
     def __getitem__(self, index):
         this_ref_id = self.ref_ids[index]
         this_img_id = self.refer.getImgIds(this_ref_id)
@@ -148,8 +159,17 @@ class ReferDatasetControl(ReferDataset):
 
         if self.image_transforms is not None:
             # resize, from PIL to tensor, and mean and std normalization
-            img, target = self.image_transforms(img, annot)
-            bbox_mask = resize(bbox_mask, (img.shape[1], img.shape[2]), interpolation=InterpolationMode.NEAREST)
+            if self.resize_to_bbox:
+                bbox_crop = [bbox[0], bbox[1], bbox[0] + bbox[2], bbox[1] + bbox[3]]
+                img = img.crop(bbox_crop)
+                annot = annot.crop(bbox_crop)
+
+                img, target = self.image_transforms(img, annot)
+                bbox_mask = resize(bbox_mask, (img.shape[1], img.shape[2]), interpolation=InterpolationMode.NEAREST)
+
+            else:
+                img, target = self.image_transforms(img, annot)
+                bbox_mask = resize(bbox_mask, (img.shape[1], img.shape[2]), interpolation=InterpolationMode.NEAREST)
 
             # bbox_mask = torch.nn.functional.interpolate(bbox_mask[None, None, ...], size=(img.shape[1], img.shape[2])).squeeze()
 
