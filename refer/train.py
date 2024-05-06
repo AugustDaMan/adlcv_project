@@ -55,13 +55,14 @@ def get_dataset(image_set, transform, args):
 
     return ds, num_classes
 
-def get_dataset_control(image_set, transform, args):
+def get_dataset_control(image_set, transform, args, resize_to_bbox=False):
     from data.dataset_refer_clip import ReferDatasetControl
     ds = ReferDatasetControl(args,
                       split=image_set,
                       image_transforms=transform,
                       target_transforms=None,
-                      eval_mode=True
+                      eval_mode=True,
+                      resize_to_bbox=resize_to_bbox
                       )
     num_classes = 2
     return ds, num_classes
@@ -143,13 +144,13 @@ def evaluate(model, data_loader, clip_model):
                     img_list = [img_unnorm, img_hint, img_output, img_target]
                     row = torch.stack(img_list)
                     grid_img = make_grid(row, nrow=len(row), padding=4)
-                    file_name = '../saved_images/train_run0/bbox_ite_%d_text_%s.png' % (total_its, raw_sentence[0][0])
+                    file_name = '../saved_images/train_run0/bbox_ite_%d_text_%s_originalvpd_%s.png' % (total_its, raw_sentence[0][0], args.use_original_vpd)
                     file_name.replace(" ", "_")
                     file_name.replace(",", "")
                     save_image(grid_img, file_name)
 
                     # save predictions
-                    pred_filename = "../saved_predictions/pred_img_ite_%d.pickle" % total_its
+                    pred_filename = "../saved_predictions/pred_img_ite_%d_originalvpd_%s.pickle" % (total_its, args.use_original_vpd)
                     pickle.dump(output, open(pred_filename, "wb"), protocol=pickle.HIGHEST_PROTOCOL)
 
 
@@ -459,8 +460,9 @@ if __name__ == "__main__":
     # Override arg with path to vpd pre-trained weights // August
     args.resume = "../saved_models/vpd_ris_refcoco.pth"
     args.output_dir = "../saved_models"
-    args.use_original_vpd = False
+    args.use_original_vpd = True
     args.sentence_drop_rate = 0.5  # Drop sentences 50% of the time // August
+    args.resize_to_bbox = True
 
     # set up distributed learning
     utils.init_distributed_mode(args)
