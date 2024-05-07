@@ -76,7 +76,7 @@ def evaluate(model, dataset_test, data_loader, clip_model, device):
         for data in metric_logger.log_every(data_loader, 100, header):
             total_its += 1
 
-            image, target, sentences, attentions, hint = data
+            image, target, sentences, attentions, hint, raw_sentence = data
             image, target, sentences, attentions, hint = image.to(device), target.to(device), \
                                                    sentences.to(device), attentions.to(device), hint.to(device)
             sentences = sentences.squeeze(1)
@@ -194,8 +194,6 @@ def main(args):
     data_loader_test = torch.utils.data.DataLoader(dataset_test, batch_size=1,
                                                    sampler=test_sampler, num_workers=args.workers)
     # print(args.model)
-    data_loader_test.dataset.refer.IMAGE_DIR = 'refer/' + data_loader_test.dataset.refer.IMAGE_DIR
-    next(iter(data_loader_test))
 
     single_model = VPDRefer(sd_path='../checkpoints/v1-5-pruned-emaonly.ckpt', neck_dim=[320,640+args.token_length,1280+args.token_length,1280], use_original_vpd=args.use_original_vpd, controlnet_batch_size=args.batch_size)
 

@@ -88,7 +88,7 @@ def criterion(input, target):
     return nn.functional.cross_entropy(input, target, weight=weight)
 
 
-def evaluate(model, data_loader, clip_model):
+def evaluate(model, data_loader, clip_model, save_images=20, epoch_num=0):
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Test:'
@@ -110,6 +110,12 @@ def evaluate(model, data_loader, clip_model):
                                                          sentences.cuda(non_blocking=True), attentions.cuda(non_blocking=True), \
                                                          hint.cuda(non_blocking=True)
             sentences = sentences.squeeze(1)
+
+            # For testing how model performs with no sentences only do to save images
+            if total_its < save_images:
+                dropped_sentences = torch.clone(sentences)
+                dropped_sentences[:]= 49407
+                
             attentions = attentions.squeeze(1)
             target = target.cpu().data.numpy()
             for idx in range(sentences.size(-1)):
@@ -135,8 +141,8 @@ def evaluate(model, data_loader, clip_model):
                     eval_seg_iou = eval_seg_iou_list[n_eval_iou]
                     seg_correct[n_eval_iou] += (this_iou >= eval_seg_iou)
                 seg_total += 1
-
-                if idx == 0:  # Save output image // August
+                
+                if idx == 0 and total_its <= save_images:  # Save output image // August
                     img_unnorm = torch.clamp(image[0] / 2 + 0.5, min=0, max=1).cpu()  # Unnormalize // August
                     img_output = torch.tile(output.argmax(1)[0], dims=(3,1,1))
                     img_target = torch.tile(torch.tensor(target[0]), dims=(3,1,1))
@@ -144,20 +150,56 @@ def evaluate(model, data_loader, clip_model):
                     img_list = [img_unnorm, img_hint, img_output, img_target]
                     row = torch.stack(img_list)
                     grid_img = make_grid(row, nrow=len(row), padding=4)
-                    file_name = '../saved_images/train_run0/bbox_ite_%d_text_%s_originalvpd_%s.png' % (total_its, raw_sentence[0][0], args.use_original_vpd)
+                    file_name = '../saved_images/train_run0/originalvpd%s_epoch%s_sentence%s_img%s.png' % (args.use_original_vpd, epoch_num, raw_sentence[0][0], total_its)
+                    # file_name = '../saved_images/train_run0/bbox_ite_%d_text_%s_originalvpd_%s.png' % (total_its, raw_sentence[0][0], args.use_original_vpd)
                     file_name.replace(" ", "_")
                     file_name.replace(",", "")
                     save_image(grid_img, file_name)
 
                     # save predictions
-                    pred_filename = "../saved_predictions/pred_img_ite_%d_originalvpd_%s.pickle" % (total_its, args.use_original_vpd)
+                    pred_filename = "../saved_predictions/originalvpd%s_epoch%s_sentence%s_img%s.pickle" % (args.use_original_vpd, epoch_num, raw_sentence[0][0], total_its)
                     pickle.dump(output, open(pred_filename, "wb"), protocol=pickle.HIGHEST_PROTOCOL)
+        
+            # Continuation of ugly fucking code before, mother, please kill me
+            if total_its < save_images:
+                for idx in range(dropped_sentences.size(-1)):
+                    
+                    if idx > save_images:
+                        break
+
+                    embedding = clip_model(input_ids=dropped_sentences[:, :, idx]).last_hidden_state
+
+                    # Added hint // August
+                    output = model(image, embedding, hint=hint)
+
+                    output = output.cpu()
+                    output_mask = output.argmax(1).data.numpy()
+
+                    if idx == 0 and total_its <= save_images:  # Save output image // August
+                        img_unnorm = torch.clamp(image[0] / 2 + 0.5, min=0, max=1).cpu()  # Unnormalize // August
+                        img_output = torch.tile(output.argmax(1)[0], dims=(3,1,1))
+                        img_target = torch.tile(torch.tensor(target[0]), dims=(3,1,1))
+                        img_hint = hint[0].cpu()
+                        img_list = [img_unnorm, img_hint, img_output, img_target]
+                        row = torch.stack(img_list)
+                        grid_img = make_grid(row, nrow=len(row), padding=4)
+                        file_name = '../saved_images/train_run0/originalvpd%s_epoch%s_sentenceDROPPED_img%s.png' % (args.use_original_vpd, epoch_num, total_its)
+                        # file_name = '../saved_images/train_run0/bbox_ite_%d_text_%s_originalvpd_%s.png' % (total_its, raw_sentence[0][0], args.use_original_vpd)
+                        file_name.replace(" ", "_")
+                        file_name.replace(",", "")
+                        save_image(grid_img, file_name)
+
+                        # save predictions
+                        pred_filename = "../saved_predictions/originalvpd%s_epoch%s_sentence%s_img%s.pickle" % (args.use_original_vpd, epoch_num, raw_sentence[0][0], total_its)
+                        pickle.dump(output, open(pred_filename, "wb"), protocol=pickle.HIGHEST_PROTOCOL)
+
 
 
         iou = acc_ious / total_its
 
     mean_IoU = np.array(mean_IoU)
     mIoU = np.mean(mean_IoU)
+    stdIoU = np.std(mean_IoU)
     print('Final results:')
     print('Mean IoU is %.2f\n' % (mIoU*100.))
     results_str = ''
@@ -167,10 +209,10 @@ def evaluate(model, data_loader, clip_model):
     results_str += '    overall IoU = %.2f\n' % (cum_I * 100. / cum_U)
     print(results_str)
 
-    return 100 * iou, 100 * cum_I / cum_U
+    return 100 * iou, 100 * cum_I / cum_U, stdIoU
 
 
-def train_one_epoch(model, criterion, optimizer, data_loader, data_loader_test, lr_scheduler, epoch, print_freq, iterations, clip_model, sentence_drop_rate, train_loss_ite_list, val_loss_ite_list):
+def train_one_epoch(model, criterion, optimizer, data_loader, data_loader_test, lr_scheduler, epoch, print_freq, iterations, clip_model, sentence_drop_rate, train_loss_ite_list, val_loss_ite_list, epoch_num=0):
 
     total_gpu_mem = torch.cuda.get_device_properties(0).total_memory/10**9  # Used to gauge model footprint // August
 
@@ -288,13 +330,14 @@ def main_single_process(args):
     # data_loader_test = torch.utils.data.DataLoader(dataset_test, batch_size=1, sampler=test_sampler, num_workers=args.workers)
 
     # data loader - single process // August
-    data_loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, num_workers=args.workers, pin_memory=args.pin_mem, drop_last=True)
+    data_loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, num_workers=args.workers, pin_memory=args.pin_mem, drop_last=True, shuffle=True)
     data_loader_test = torch.utils.data.DataLoader(dataset_test, batch_size=1, num_workers=args.workers)
 
     # data_loader.dataset.dataset.refer.IMAGE_DIR = 'refer/' + data_loader.dataset.dataset.refer.IMAGE_DIR
 
     print("Creating subset of train dataloader %d / %d" % (subset_size_train, n_train))
     print("Creating subset of test dataloader %d / %d" % (subset_size_test, n_test))
+    # data_loader.dataset.dataset.refer.IMAGE_DIR = 'refer/' + data_loader.dataset.dataset.refer.IMAGE_DIR
 
     model = VPDRefer(sd_path='../checkpoints/v1-5-pruned-emaonly.ckpt', neck_dim=[320,640+args.token_length,1280+args.token_length,1280], use_original_vpd=args.use_original_vpd, controlnet_batch_size=args.batch_size)
 
@@ -306,7 +349,7 @@ def main_single_process(args):
     #single_model = model.module
 
     clip_model = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
-    clip_model.cuda()
+    clip_model.cuda()   
     clip_model = clip_model.eval()
     for param in clip_model.parameters():
         param.requires_grad = False
@@ -363,6 +406,7 @@ def main_single_process(args):
     train_loss_ite_list = []
     val_loss_ite_list = []
     iou_list = []
+    std_iou_list = []
     overallIoU_list = []
 
     # resume training (optimizer, lr scheduler, and the epoch)
@@ -394,9 +438,10 @@ def main_single_process(args):
                         train_loss_ite_list,
                         val_loss_ite_list)
 
-        iou, overallIoU = evaluate(model, data_loader_test, clip_model)
+        iou, overallIoU, stdIoU = evaluate(model, data_loader_test, clip_model, save_images=20, epoch_num=epoch)
 
         iou_list.append(iou)  # Append iou to list after every epoch // August
+        std_iou_list.append(stdIoU)
         overallIoU_list.append(overallIoU)  # Append overall iou to list after every epoch // August
 
         print('Average object IoU {}'.format(iou))
@@ -416,11 +461,12 @@ def main_single_process(args):
                                                             'model_best_{}.pth'.format(args.model_id)))
             best_oIoU = overallIoU
 
-    # Save losses as pickle files // August
-    pickle.dump(iou_list, open("../saved_losses/iou_list.pickle", "wb"), protocol=pickle.HIGHEST_PROTOCOL)
-    pickle.dump(overallIoU_list, open("../saved_losses/overallIoU_list.pickle", "wb"), protocol=pickle.HIGHEST_PROTOCOL)
-    pickle.dump(train_loss_ite_list, open("../saved_losses/train_loss_ite_list.pickle", "wb"), protocol=pickle.HIGHEST_PROTOCOL)
-    pickle.dump(val_loss_ite_list, open("../saved_losses/val_loss_ite_list.pickle", "wb"),protocol=pickle.HIGHEST_PROTOCOL)
+        # Save losses as pickle files // August
+        pickle.dump(iou_list, open(f"../saved_losses/iou_list_epoch{epoch}_sentencedrop{args.sentence_drop_rate}_originalVPD{args.use_original_vpd}.pickle", "wb"), protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(overallIoU_list, open(f"../saved_losses/overallIoU_list_epoch{epoch}_sentencedrop{args.sentence_drop_rate}_originalVPD{args.use_original_vpd}.pickle", "wb"), protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(std_iou_list, open(f"../saved_losses/std_iou_list_epoch{epoch}_sentencedrop{args.sentence_drop_rate}_originalVPD{args.use_original_vpd}.pickle", "wb"), protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(train_loss_ite_list, open(f"../saved_losses/train_loss_ite_list_epoch{epoch}_sentencedrop{args.sentence_drop_rate}_originalVPD{args.use_original_vpd}.pickle", "wb"), protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(val_loss_ite_list, open(f"../saved_losses/val_loss_ite_list_epoch{epoch}_sentencedrop{args.sentence_drop_rate}_originalVPD{args.use_original_vpd}.pickle", "wb"),protocol=pickle.HIGHEST_PROTOCOL)
 
     # summarize
     total_time = time.time() - start_time
@@ -452,7 +498,7 @@ if __name__ == "__main__":
     args.nproc_per_node = 1
     args.lr = 0.00005
     args.wd = 1e-2
-    args.epochs = 10
+    args.epochs = 5
     args.token_length = 40
     args.dataset = "refcoco"
     args.model_id = "refcoco"
